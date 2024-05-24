@@ -13,6 +13,15 @@ func TestForward(t *testing.T) {
 	}))
 	defer backend.Close()
 
+	// Инициализируем карту servers для теста
+	servers = map[string]*serverStatus{
+		backend.URL[len("http://"):]: {
+			address:  backend.URL[len("http://"):],
+			traffic:  0,
+			isHealthy: true,
+		},
+	}
+
 	rw := httptest.NewRecorder()
 	req := httptest.NewRequest("GET", "http://example.com", nil)
 
