@@ -28,7 +28,7 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@v2
       with:
-        go-version: 1.16
+        go-version: 1.22
 
     - name: Build
       run: go build -v ./...
@@ -43,4 +43,4 @@ jobs:
       run: |
         docker-compose -f docker-compose.yaml up -d
         sleep 10 # Wait for services to start
-        docker-compose -f docker-compose.test.yaml run -e INTEGRATION_TEST=1 integration
+        docker-compose -f docker-compose.test.yaml run test

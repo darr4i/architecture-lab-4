@@ -1,4 +1,3 @@
-// balancer.go
 package main
 
 import (
@@ -23,10 +22,23 @@ var (
 )
 
 var (
-	timeout      = time.Duration(*timeoutSec) * time.Second
-	serversPool  = []string{"server1:8080", "server2:8080", "server3:8080"}
-	trafficStats = make(map[string]int64)
-	mutex        sync.Mutex
+	timeout     = time.Duration(*timeoutSec) * time.Second
+	serversPool = []string{
+		"server1:8080",
+		"server2:8080",
+		"server3:8080",
+	}
+)
+
+type serverStatus struct {
+	address  string
+	traffic  int64
+	isHealthy bool
+}
+
+var (
+	mu       sync.Mutex
+	servers  = make(map[string]*serverStatus)
 )
 
 func scheme() string {
@@ -37,21 +49,20 @@ func scheme() string {
 }
 
 func health(dst string) bool {
-	ctx, _ := context.WithTimeout(context.Background(), timeout)
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
 	req, _ := http.NewRequestWithContext(ctx, "GET",
 		fmt.Sprintf("%s://%s/health", scheme(), dst), nil)
 	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return false
-	}
-	if resp.StatusCode != http.StatusOK {
+	if err != nil || resp.StatusCode != http.StatusOK {
 		return false
 	}
 	return true
 }
 
 func forward(dst string, rw http.ResponseWriter, r *http.Request) error {
-	ctx, _ := context.WithTimeout(r.Context(), timeout)
+	ctx, cancel := context.WithTimeout(r.Context(), timeout)
+	defer cancel()
 	fwdRequest := r.Clone(ctx)
 	fwdRequest.RequestURI = ""
 	fwdRequest.URL.Host = dst
@@ -60,6 +71,9 @@ func forward(dst string, rw http.ResponseWriter, r *http.Request) error {
 
 	resp, err := http.DefaultClient.Do(fwdRequest)
 	if err == nil {
+		mu.Lock()
+		servers[dst].traffic += resp.ContentLength
+		mu.Unlock()
 		for k, values := range resp.Header {
 			for _, value := range values {
 				rw.Header().Add(k, value)
@@ -71,13 +85,10 @@ func forward(dst string, rw http.ResponseWriter, r *http.Request) error {
 		log.Println("fwd", resp.StatusCode, resp.Request.URL)
 		rw.WriteHeader(resp.StatusCode)
 		defer resp.Body.Close()
-		bytes, err := io.Copy(rw, resp.Body)
+		_, err := io.Copy(rw, resp.Body)
 		if err != nil {
 			log.Printf("Failed to write response: %s", err)
 		}
-		mutex.Lock()
-		trafficStats[dst] += bytes
-		mutex.Unlock()
 		return nil
 	} else {
 		log.Printf("Failed to get response from %s: %s", dst, err)
@@ -86,44 +97,48 @@ func forward(dst string, rw http.ResponseWriter, r *http.Request) error {
 	}
 }
 
-func selectServer() string {
-	mutex.Lock()
-	defer mutex.Unlock()
-
-	var selectedServer string
-	var minTraffic int64 = -1
-
-	for _, server := range serversPool {
-		if minTraffic == -1 || trafficStats[server] < minTraffic {
-			selectedServer = server
-			minTraffic = trafficStats[server]
+func getHealthyServer() string {
+	mu.Lock()
+	defer mu.Unlock()
+	var bestServer *serverStatus
+	for _, server := range servers {
+		if server.isHealthy {
+			if bestServer == nil || server.traffic < bestServer.traffic {
+				bestServer = server
+			}
 		}
 	}
-
-	return selectedServer
+	if bestServer != nil {
+		return bestServer.address
+	}
+	return ""
 }
 
 func main() {
 	flag.Parse()
 
-	// Initialize traffic stats
 	for _, server := range serversPool {
-		trafficStats[server] = 0
-	}
-
-	// Monitor health of servers
-	for _, server := range serversPool {
-		server := server
-		go func() {
+		servers[server] = &serverStatus{
+			address:  server,
+			traffic:  0,
+			isHealthy: false,
+		}
+		go func(server string) {
 			for range time.Tick(10 * time.Second) {
-				log.Println(server, health(server))
+				servers[server].isHealthy = health(server)
 			}
-		}()
+		}(server)
 	}
 
 	frontend := httptools.CreateServer(*port, http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
-		server := selectServer()
-		forward(server, rw, r)
+		server := getHealthyServer()
+		if server == "" {
+			http.Error(rw, "No healthy servers available", http.StatusServiceUnavailable)
+			return
+		}
+		if err := forward(server, rw, r); err != nil {
+			http.Error(rw, "Failed to forward request", http.StatusServiceUnavailable)
+		}
 	}))
 
 	log.Println("Starting load balancer...")

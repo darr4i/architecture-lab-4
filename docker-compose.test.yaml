@@ -1,5 +1,9 @@
 version: '2.1'
 
+networks:
+  servers:
+    driver: bridge
+
 services:
   test:
     build:
@@ -14,5 +18,36 @@ services:
       - balancer
 
   balancer:
-    # Для тестів включаємо режим відлагодження, коли балансувальник додає інформацію, кому було відправлено запит.
+    build:
+      context: .
+      dockerfile: Dockerfile
+    networks:
+      - servers
     command: ["lb", "--trace=true"]
+
+  server1:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    networks:
+      - servers
+    environment:
+      - CONF_RESPONSE_DELAY_SEC=1
+
+  server2:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    networks:
+      - servers
+    environment:
+      - CONF_RESPONSE_DELAY_SEC=1
+
+  server3:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    networks:
+      - servers
+    environment:
+      - CONF_RESPONSE_DELAY_SEC=1
