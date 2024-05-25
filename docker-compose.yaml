@@ -2,9 +2,9 @@ version: '2.1'
 
 networks:
   servers:
-    driver: bridge
 
 services:
+
   balancer:
     build: .
     command: "lb"

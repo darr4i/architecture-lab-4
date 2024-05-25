@@ -9,7 +9,6 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.test
-    working_dir: /go/src/practice-4
     networks:
       - servers
     depends_on:
@@ -17,7 +16,38 @@ services:
       - server2
       - server3
       - balancer
+
+  balancer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    networks:
+      - servers
+    command: ["lb", "--trace=true"]
+
+  server1:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    networks:
+      - servers
     environment:
-      - BALANCER_URL=http://balancer:8090
-      - INTEGRATION_TEST=1
-    command: ["go", "test", "-v", "./integration/..."]
+      - CONF_RESPONSE_DELAY_SEC=1
+
+  server2:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    networks:
+      - servers
+    environment:
+      - CONF_RESPONSE_DELAY_SEC=1
+
+  server3:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    networks:
+      - servers
+    environment:
+      - CONF_RESPONSE_DELAY_SEC=1

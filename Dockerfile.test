@@ -1,9 +1,7 @@
-FROM golang:1.22
+FROM golang:1.22 as build
 
 WORKDIR /go/src/practice-4
-
 COPY . .
 
-RUN go mod download
-
-CMD ["go", "test", "-v", "./integration/..."]
+ENV INTEGRATION_TEST=1
+ENTRYPOINT ["go", "test", "./integration"]
